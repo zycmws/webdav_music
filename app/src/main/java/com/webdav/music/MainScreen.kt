@@ -5,6 +5,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,8 +28,18 @@ fun MainScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     var showOnboarding by remember { mutableStateOf(!hasCompletedOnboarding) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
 
     LaunchedEffect(hasCompletedOnboarding) {
         showOnboarding = !hasCompletedOnboarding
@@ -59,7 +71,8 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -163,6 +176,9 @@ fun MainScreen(
                             currentTrackId = playerState.currentMusic?.id,
                             onTrackClick = { track ->
                                 viewModel.playMusic(track, tracks)
+                            },
+                            onDownload = { track ->
+                                viewModel.downloadTrack(track)
                             }
                         )
                     }

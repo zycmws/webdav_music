@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -13,12 +14,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.webdav.music.data.model.MusicItem
+import com.webdav.music.data.model.MusicSource
 
 @Composable
 fun TrackList(
     tracks: List<MusicItem>,
     currentTrackId: String?,
     onTrackClick: (MusicItem) -> Unit,
+    onDownload: ((MusicItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(modifier = modifier) {
@@ -26,7 +29,8 @@ fun TrackList(
             TrackItem(
                 track = track,
                 isPlaying = track.id == currentTrackId,
-                onClick = { onTrackClick(track) }
+                onClick = { onTrackClick(track) },
+                onDownload = onDownload?.let { { it(track) } }
             )
         }
     }
@@ -36,7 +40,8 @@ fun TrackList(
 private fun TrackItem(
     track: MusicItem,
     isPlaying: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDownload: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -74,6 +79,15 @@ private fun TrackItem(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )
+        }
+        if (track.source == MusicSource.WEBDAV && !track.isDownloaded && onDownload != null) {
+            IconButton(onClick = onDownload) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = "Download",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
