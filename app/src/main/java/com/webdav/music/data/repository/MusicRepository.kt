@@ -19,9 +19,9 @@ class MusicRepository(context: Context) {
     private val webDAVDataSource = WebDAVDataSource(context)
     val preferencesManager = PreferencesManager(context)
 
-    suspend fun getLocalMusic(): List<MusicItem> {
-        Log.d(TAG, "getLocalMusic: 开始扫描本地音乐")
-        return localDataSource.scanMusic()
+    suspend fun getLocalMusic(dirPath: String): List<MusicItem> {
+        Log.d(TAG, "getLocalMusic: 开始扫描本地音乐目录 $dirPath")
+        return localDataSource.scanMusic(dirPath)
     }
 
     suspend fun getWebDAVMusic(): List<MusicItem> {
@@ -37,8 +37,8 @@ class MusicRepository(context: Context) {
         }
     }
 
-    suspend fun getAllMusic(): List<MusicItem> {
-        return getLocalMusic() + getWebDAVMusic()
+    suspend fun getAllMusic(dirPath: String): List<MusicItem> {
+        return getLocalMusic(dirPath) + getWebDAVMusic()
     }
 
     suspend fun getWebDAVConfig(): WebDAVConfig {

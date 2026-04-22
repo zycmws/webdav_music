@@ -1,6 +1,7 @@
 package com.webdav.music.data.local
 
 import android.content.Context
+import android.os.Environment
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
@@ -20,6 +21,7 @@ class PreferencesManager(private val context: Context) {
         private val LAST_PLAYED_PROGRESS = longPreferencesKey("last_played_progress")
         private val SHUFFLE_MODE = booleanPreferencesKey("shuffle_mode")
         private val REPEAT_MODE = stringPreferencesKey("repeat_mode")
+        private val LOCAL_MUSIC_DIR = stringPreferencesKey("local_music_dir")
     }
 
     val webDAVServerUrl: Flow<String> = context.dataStore.data.map { it[WEBDAV_SERVER_URL] ?: "" }
@@ -30,6 +32,9 @@ class PreferencesManager(private val context: Context) {
     val lastPlayedProgress: Flow<Long> = context.dataStore.data.map { it[LAST_PLAYED_PROGRESS] ?: 0L }
     val shuffleMode: Flow<Boolean> = context.dataStore.data.map { it[SHUFFLE_MODE] ?: false }
     val repeatMode: Flow<String> = context.dataStore.data.map { it[REPEAT_MODE] ?: "OFF" }
+    val localMusicDir: Flow<String> = context.dataStore.data.map {
+        it[LOCAL_MUSIC_DIR] ?: Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).absolutePath
+    }
 
     suspend fun saveWebDAVConfig(serverUrl: String, username: String, password: String) {
         context.dataStore.edit { prefs ->
@@ -56,5 +61,11 @@ class PreferencesManager(private val context: Context) {
 
     suspend fun saveRepeatMode(mode: String) {
         context.dataStore.edit { it[REPEAT_MODE] = mode }
+    }
+
+    suspend fun saveLocalMusicDir(dirPath: String) {
+        context.dataStore.edit { prefs ->
+            prefs[LOCAL_MUSIC_DIR] = dirPath
+        }
     }
 }

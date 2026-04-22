@@ -101,7 +101,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                _localMusic.value = repository.getLocalMusic()
+                val dir = repository.preferencesManager.localMusicDir.first()
+                Log.d(TAG, "loadLocalMusic: 使用目录 $dir")
+                _localMusic.value = repository.getLocalMusic(dir)
                 Log.d(TAG, "loadLocalMusic: 加载了 ${_localMusic.value.size} 首")
             } catch (e: Exception) {
                 Log.e(TAG, "loadLocalMusic: 失败 ${e.message}")
