@@ -61,32 +61,9 @@ fun SettingsScreen(
                 Log.w(TAG, "Could not take persistable permission: $e")
             }
 
-            // Convert tree URI to file path
-            val docId = DocumentsContract.getTreeDocumentId(it)
-            Log.d(TAG, "Selected folder docId: $docId")
-
-            // Parse the docId to extract path
-            // Format is like "primary:Music" or "sdcard:Music"
-            val pathFromUri = try {
-                val parts = docId.split(":")
-                if (parts.size >= 2) {
-                    val type = parts[0]
-                    val relativePath = parts[1]
-                    when (type) {
-                        "primary" -> "/storage/emulated/0/$relativePath"
-                        else -> "/storage/$type/$relativePath"
-                    }
-                } else {
-                    // Fallback: try to use the URI directly
-                    it.path ?: ""
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse folder URI: $e")
-                ""
-            }
-
-            Log.d(TAG, "Selected folder path: $pathFromUri")
-            localMusicDir = pathFromUri
+            // 保存原始 URI（content://...）
+            Log.d(TAG, "Selected folder URI: $it")
+            localMusicDir = it.toString()
         }
     }
 
@@ -154,7 +131,19 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
-                                text = localMusicDir.ifEmpty { "点击选择目录" },
+                                text = if (localMusicDir.startsWith("content://")) {
+                                    // Try to get folder name from URI
+                                    try {
+                                        val docId = DocumentsContract.getTreeDocumentId(Uri.parse(localMusicDir))
+                                        docId.substringAfter(":").substringAfterLast("/")
+                                    } catch (e: Exception) {
+                                        "已选择文件夹"
+                                    }
+                                } else if (localMusicDir.isNotEmpty()) {
+                                    localMusicDir.substringAfterLast("/")
+                                } else {
+                                    "点击选择目录"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

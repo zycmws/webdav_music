@@ -153,6 +153,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Calculate index BEFORE shuffling for correct next/previous navigation
+        val originalIndex = playlist.indexOf(musicItem)
+
         val effectivePlaylist = if (_playerState.value.shuffleMode) {
             playlist.shuffled()
         } else {
@@ -162,8 +165,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _playerState.update {
             it.copy(
                 currentMusic = musicItem,
-                playlist = effectivePlaylist,
-                currentIndex = index,
+                playlist = playlist,  // Keep original playlist for next/prev
+                currentIndex = originalIndex,  // Save original index for correct navigation
                 isPlaying = true,
                 progress = 0,
                 duration = musicItem.duration
@@ -187,15 +190,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playNext() {
         val state = _playerState.value
+        Log.d(TAG, "playNext: playlist size=${state.playlist.size}, currentIndex=${state.currentIndex}")
         if (state.playlist.isEmpty()) return
         val nextIndex = (state.currentIndex + 1) % state.playlist.size
+        Log.d(TAG, "playNext: nextIndex=$nextIndex, nextTrack=${state.playlist[nextIndex].title}")
         playMusic(state.playlist[nextIndex], state.playlist)
     }
 
     fun playPrevious() {
         val state = _playerState.value
+        Log.d(TAG, "playPrevious: playlist size=${state.playlist.size}, currentIndex=${state.currentIndex}")
         if (state.playlist.isEmpty()) return
         val prevIndex = if (state.currentIndex > 0) state.currentIndex - 1 else state.playlist.size - 1
+        Log.d(TAG, "playPrevious: prevIndex=$prevIndex, prevTrack=${state.playlist[prevIndex].title}")
         playMusic(state.playlist[prevIndex], state.playlist)
     }
 

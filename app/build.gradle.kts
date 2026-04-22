@@ -18,6 +18,16 @@ android {
     }
 }
 
+kotlin {
+    jvmToolchain(17)
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
 dependencies {
     // Core Android
     implementation("androidx.core:core-ktx:1.12.0")
@@ -27,6 +37,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
@@ -35,10 +46,23 @@ dependencies {
     // Media3 ExoPlayer
     implementation("androidx.media3:media3-exoplayer:1.2.1")
     implementation("androidx.media3:media3-session:1.2.1")
+    implementation("androidx.media3:media3-ui:1.2.1")
+
+    // Media for NotificationCompat.MediaStyle
+    implementation("androidx.media:media:1.7.0")
 
     // OkHttp for WebDAV
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    // DocumentFile for SAF
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
+    // Testing
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("io.mockk:mockk:1.13.9")
+    testImplementation("androidx.arch.core:core-testing:2.2.0")
 }
