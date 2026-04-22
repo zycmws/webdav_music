@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.webdav.music.data.model.MusicItem
@@ -19,6 +20,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+
+private const val TAG = "MainViewModel"
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -54,6 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            Log.d(TAG, "onServiceConnected")
             val binder = service as AudioPlayerService.AudioPlayerBinder
             audioService = binder.getService()
             serviceBound = true
@@ -62,37 +67,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            Log.d(TAG, "onServiceDisconnected")
             audioService = null
             serviceBound = false
         }
     }
 
     init {
+        Log.d(TAG, "init")
         bindService()
         checkOnboarding()
         loadLocalMusic()
     }
 
     private fun bindService() {
+        Log.d(TAG, "bindService")
         val intent = Intent(getApplication(), AudioPlayerService::class.java)
         getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     private fun checkOnboarding() {
+        Log.d(TAG, "checkOnboarding")
         viewModelScope.launch {
             repository.hasCompletedOnboarding().collect {
+                Log.d(TAG, "hasCompletedOnboarding: $it")
                 _hasCompletedOnboarding.value = it
             }
         }
     }
 
     fun loadLocalMusic() {
+        Log.d(TAG, "loadLocalMusic")
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 _localMusic.value = repository.getLocalMusic()
+                Log.d(TAG, "loadLocalMusic: 加载了 ${_localMusic.value.size} 首")
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to load local music"
+                Log.e(TAG, "loadLocalMusic: 失败 ${e.message}")
+                _errorMessage.value = "加载本地音乐失败"
             } finally {
                 _isLoading.value = false
             }
@@ -100,16 +113,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadWebDAVMusic() {
+        Log.d(TAG, "loadWebDAVMusic")
         viewModelScope.launch {
             _isLoading.value = true
             try {
+                Log.d(TAG, "loadWebDAVMusic: 开始获取缓存")
                 val cached = repository.getCachedMusic()
+                Log.d(TAG, "loadWebDAVMusic: 缓存数量 ${cached.size}")
+
+                Log.d(TAG, "loadWebDAVMusic: 开始获取远程音乐")
                 val remote = repository.getWebDAVMusic()
+                Log.d(TAG, "loadWebDAVMusic: 远程音乐数量 ${remote.size}")
+
                 _webDAVMusic.value = remote.map { remoteItem ->
                     cached.find { it.id == remoteItem.id } ?: remoteItem
                 }
+                Log.d(TAG, "loadWebDAVMusic: 最终列表 ${_webDAVMusic.value.size} 首")
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to load WebDAV music"
+                Log.e(TAG, "loadWebDAVMusic: 失败 ${e.message}")
+                e.printStackTrace()
+                _errorMessage.value = "加载 WebDAV 音乐失败: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
@@ -117,30 +140,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playMusic(musicItem: MusicItem, playlist: List<MusicItem>) {
-        val index = playlist.indexOf(musicItem)
+        Log.d(TAG, "playMusic: ${musicItem.title}")
+
+        // Set WebDAV credentials if playing WebDAV music (synchronous for immediate use)
+        if (musicItem.source == com.webdav.music.data.model.MusicSource.WEBDAV) {
+            runBlocking {
+                val config = repository.getWebDAVConfig()
+                Log.d(TAG, "playMusic: 设置 WebDAV 认证 ${config.username}")
+                audioService?.setWebDAVCredentials(config.username, config.password)
+            }
+        }
+
+        val effectivePlaylist = if (_playerState.value.shuffleMode) {
+            playlist.shuffled()
+        } else {
+            playlist
+        }
+        val index = effectivePlaylist.indexOf(musicItem)
         _playerState.update {
             it.copy(
                 currentMusic = musicItem,
-                playlist = playlist,
+                playlist = effectivePlaylist,
                 currentIndex = index,
                 isPlaying = true,
                 progress = 0,
                 duration = musicItem.duration
             )
         }
-        audioService?.playMusic(musicItem)
+        audioService?.playMusic(musicItem, _playerState.value.repeatMode)
     }
 
     fun togglePlayPause() {
-        val current = _playerState.value
-        if (current.currentMusic == null) return
+        Log.d(TAG, "togglePlayPause")
+        if (_playerState.value.currentMusic == null) return
 
-        if (current.isPlaying) {
+        val currentlyPlaying = _playerState.value.isPlaying
+        if (currentlyPlaying) {
             audioService?.pause()
         } else {
             audioService?.play()
         }
-        _playerState.update { it.copy(isPlaying = !current.isPlaying) }
+        _playerState.update { it.copy(isPlaying = !currentlyPlaying) }
     }
 
     fun playNext() {
@@ -178,14 +218,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             RepeatMode.ONE -> RepeatMode.OFF
         }
         _playerState.update { it.copy(repeatMode = newMode) }
+        audioService?.setRepeatMode(newMode)
         viewModelScope.launch {
             repository.preferencesManager.saveRepeatMode(newMode.name)
         }
     }
 
     fun selectTab(index: Int) {
+        Log.d(TAG, "selectTab: $index")
         _selectedTab.value = index
         if (index == 1) {
+            Log.d(TAG, "selectTab: WebDAV 标签被选中，加载音乐")
             loadWebDAVMusic()
         }
     }
@@ -259,6 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startProgressUpdates() {
         progressUpdateJob?.cancel()
+        var saveCounter = 0
         progressUpdateJob = viewModelScope.launch {
             while (isActive) {
                 audioService?.updateProgress()
@@ -266,9 +310,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val duration = audioService?.duration?.value ?: 0L
                 _playerState.update { it.copy(progress = progress, duration = duration) }
 
-                val current = _playerState.value.currentMusic
-                if (current != null) {
-                    repository.savePlaybackProgress(current.id, progress)
+                // Save progress every 10 seconds to avoid excessive writes
+                saveCounter++
+                if (saveCounter >= 10) {
+                    saveCounter = 0
+                    val current = _playerState.value.currentMusic
+                    if (current != null) {
+                        repository.savePlaybackProgress(current.id, progress)
+                    }
                 }
                 delay(1000)
             }

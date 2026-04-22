@@ -34,7 +34,11 @@ fun PlayerControls(
     Column(modifier = modifier) {
         Slider(
             value = if (duration > 0) progress.toFloat() / duration.toFloat() else 0f,
-            onValueChange = { onSeek((it * duration).toLong()) },
+            onValueChange = { value ->
+                if (duration > 0) {
+                    onSeek((value * duration).toLong())
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         )
 

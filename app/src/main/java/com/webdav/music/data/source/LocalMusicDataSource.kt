@@ -1,63 +1,60 @@
 package com.webdav.music.data.source
 
-import android.content.ContentUris
 import android.content.Context
-import android.provider.MediaStore
+import android.os.Environment
+import android.util.Log
 import com.webdav.music.data.model.MusicItem
 import com.webdav.music.data.model.MusicSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class LocalMusicDataSource(private val context: Context) {
 
-    suspend fun scanMusic(): List<MusicItem> = withContext(Dispatchers.IO) {
+    companion object {
+        private const val TAG = "LocalMusicDataSource"
+        // 默认扫描 /storage/emulated/0/Music 目录
+        private val DEFAULT_MUSIC_DIR = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).absolutePath
+    }
+
+    suspend fun scanMusic(dirPath: String = DEFAULT_MUSIC_DIR): List<MusicItem> = withContext(Dispatchers.IO) {
         val musicItems = mutableListOf<MusicItem>()
-        val projection = arrayOf(
-            MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST,
-            MediaStore.Audio.Media.ALBUM,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATA
-        )
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
-        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
+        val audioExtensions = listOf("mp3", "flac", "aac", "ogg", "wav", "m4a")
 
-        context.contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            null,
-            sortOrder
-        )?.use { cursor ->
-            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+        Log.d(TAG, "scanMusic: 扫描目录 $dirPath")
 
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idColumn)
-                val title = cursor.getString(titleColumn) ?: "Unknown"
-                val artist = cursor.getString(artistColumn) ?: "Unknown Artist"
-                val album = cursor.getString(albumColumn) ?: "Unknown Album"
-                val duration = cursor.getLong(durationColumn)
-                val path = cursor.getString(dataColumn) ?: ""
+        val musicDir = File(dirPath)
+        if (!musicDir.exists() || !musicDir.isDirectory) {
+            Log.w(TAG, "scanMusic: 目录不存在 $dirPath")
+            return@withContext musicItems
+        }
 
-                if (duration > 0) {
-                    val contentUri = ContentUris.withAppendedId(
-                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                        id
-                    )
+        scanDirectory(musicDir, audioExtensions, musicItems)
+
+        Log.d(TAG, "scanMusic: 扫描到 ${musicItems.size} 首音乐")
+        musicItems
+    }
+
+    private fun scanDirectory(dir: File, audioExtensions: List<String>, musicItems: MutableList<MusicItem>) {
+        dir.listFiles()?.forEach { file ->
+            if (file.isDirectory) {
+                // 递归扫描子目录
+                scanDirectory(file, audioExtensions, musicItems)
+            } else if (file.isFile) {
+                val extension = file.extension.lowercase()
+                if (extension in audioExtensions) {
+                    val title = file.nameWithoutExtension
+                    val artist = "本地音乐"
+                    val album = dir.name
+
                     musicItems.add(
                         MusicItem(
-                            id = "local_$id",
+                            id = "local_${file.absolutePath.hashCode()}",
                             title = title,
                             artist = artist,
                             album = album,
-                            duration = duration,
-                            path = contentUri.toString(),
+                            duration = 0, // 本地文件暂不获取时长
+                            path = file.absolutePath,
                             source = MusicSource.LOCAL,
                             isDownloaded = false
                         )
@@ -65,6 +62,5 @@ class LocalMusicDataSource(private val context: Context) {
                 }
             }
         }
-        musicItems
     }
 }

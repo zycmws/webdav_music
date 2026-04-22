@@ -1,25 +1,36 @@
 package com.webdav.music.ui
 
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.webdav.music.data.model.WebDAVConfig
+import com.webdav.music.data.repository.MusicRepository
+import kotlinx.coroutines.launch
+
+private const val TAG = "OnboardingScreen"
 
 @Composable
 fun OnboardingScreen(
-    onComplete: (serverUrl: String, username: String, password: String) -> Unit,
+    onComplete: () -> Unit,
     onSkip: () -> Unit
 ) {
-    var serverUrl by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var serverUrl by remember { mutableStateOf("http://192.168.1.5:5005/") }
+    var username by remember { mutableStateOf("zyc") }
+    var password by remember { mutableStateOf("zcgy1011") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repository = remember { MusicRepository(context) }
 
     Column(
         modifier = Modifier
@@ -29,14 +40,14 @@ fun OnboardingScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "WebDAV Music",
+            text = "WebDAV 音乐播放器",
             style = MaterialTheme.typography.headlineLarge
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Configure your WebDAV server",
+            text = "配置您的 WebDAV 服务器",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -46,11 +57,12 @@ fun OnboardingScreen(
         OutlinedTextField(
             value = serverUrl,
             onValueChange = { serverUrl = it; errorMessage = null },
-            label = { Text("Server URL") },
-            placeholder = { Text("https://example.com/webdav/") },
+            label = { Text("服务器地址") },
+            placeholder = { Text("http://192.168.1.5:5005/") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            enabled = !isLoading
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -58,9 +70,10 @@ fun OnboardingScreen(
         OutlinedTextField(
             value = username,
             onValueChange = { username = it; errorMessage = null },
-            label = { Text("Username") },
+            label = { Text("用户名") },
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            enabled = !isLoading
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -68,11 +81,12 @@ fun OnboardingScreen(
         OutlinedTextField(
             value = password,
             onValueChange = { password = it; errorMessage = null },
-            label = { Text("Password") },
+            label = { Text("密码") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            enabled = !isLoading
         )
 
         if (errorMessage != null) {
@@ -88,12 +102,34 @@ fun OnboardingScreen(
 
         Button(
             onClick = {
+                Log.d(TAG, "点击连接按钮")
+                Log.d(TAG, "服务器: $serverUrl")
+                Log.d(TAG, "用户名: $username")
+
                 if (serverUrl.isBlank()) {
-                    errorMessage = "Server URL is required"
+                    errorMessage = "请输入服务器地址"
                     return@Button
                 }
                 isLoading = true
-                onComplete(serverUrl, username, password)
+                errorMessage = null
+                scope.launch {
+                    Log.d(TAG, "开始测试连接")
+                    val config = WebDAVConfig(serverUrl, username, password)
+                    val success = repository.testWebDAVConnection(config)
+                    Log.d(TAG, "连接测试结果: $success")
+
+                    if (success) {
+                        Log.d(TAG, "连接成功，保存配置")
+                        repository.saveWebDAVConfig(config)
+                        repository.setOnboardingCompleted()
+                        Log.d(TAG, "跳转主页面")
+                        onComplete()
+                    } else {
+                        Log.e(TAG, "连接失败")
+                        errorMessage = "连接失败，请检查服务器地址和凭据"
+                        isLoading = false
+                    }
+                }
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading
@@ -104,17 +140,22 @@ fun OnboardingScreen(
                     color = MaterialTheme.colorScheme.onPrimary
                 )
             } else {
-                Text("Connect & Start")
+                Text("连接并开始")
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         TextButton(
-            onClick = onSkip,
+            onClick = {
+                scope.launch {
+                    repository.setOnboardingCompleted()
+                }
+                onSkip()
+            },
             enabled = !isLoading
         ) {
-            Text("Skip, use local music only")
+            Text("跳过，仅使用本地音乐")
         }
     }
 }

@@ -4,17 +4,22 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.webdav.music.data.repository.MusicRepository
 import com.webdav.music.ui.components.PlayerControls
 import com.webdav.music.ui.components.SearchBar
 import com.webdav.music.ui.components.TrackList
+import com.webdav.music.ui.OnboardingScreen
+import com.webdav.music.ui.screens.SettingsScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,6 +36,10 @@ fun MainScreen(
     val errorMessage by viewModel.errorMessage.collectAsState()
 
     var showOnboarding by remember { mutableStateOf(!hasCompletedOnboarding) }
+    var showSettings by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val repository = remember { MusicRepository(context) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -47,18 +56,20 @@ fun MainScreen(
 
     if (showOnboarding) {
         OnboardingScreen(
-            onComplete = { serverUrl, username, password ->
-                viewModel.testAndSaveWebDAVConfig(serverUrl, username, password) { success ->
-                    if (success) {
-                        viewModel.setOnboardingCompleted()
-                        showOnboarding = false
-                    }
-                }
+            onComplete = {
+                showOnboarding = false
             },
             onSkip = {
-                viewModel.setOnboardingCompleted()
                 showOnboarding = false
             }
+        )
+        return
+    }
+
+    if (showSettings) {
+        SettingsScreen(
+            repository = repository,
+            onBack = { showSettings = false }
         )
         return
     }
@@ -66,7 +77,12 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("My Music") },
+                title = { Text("我的音乐") },
+                actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -141,7 +157,7 @@ fun MainScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { viewModel.selectTab(0) },
-                    text = { Text("Local") },
+                    text = { Text("本地音乐") },
                     icon = { Icon(Icons.Default.Folder, contentDescription = null) }
                 )
                 Tab(
@@ -166,7 +182,7 @@ fun MainScreen(
 
                     if (tracks.isEmpty()) {
                         Text(
-                            text = if (selectedTab == 0) "No local music found" else "No WebDAV music found",
+                            text = if (selectedTab == 0) "未找到本地音乐" else "未找到 WebDAV 音乐",
                             modifier = Modifier.align(Alignment.Center),
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
@@ -176,9 +192,6 @@ fun MainScreen(
                             currentTrackId = playerState.currentMusic?.id,
                             onTrackClick = { track ->
                                 viewModel.playMusic(track, tracks)
-                            },
-                            onDownload = { track ->
-                                viewModel.downloadTrack(track)
                             }
                         )
                     }
