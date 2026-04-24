@@ -28,6 +28,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.common.ForwardingPlayer as BaseForwardingPlayer
 import androidx.media3.session.MediaSession
 import com.webdav.music.MainActivity
 import com.webdav.music.R
@@ -40,7 +41,8 @@ import kotlinx.coroutines.flow.StateFlow
 class AudioPlayerService : Service() {
 
     private val binder = AudioPlayerBinder()
-    private var player: ExoPlayer? = null
+    private var exoPlayer: ExoPlayer? = null
+    private var player: CustomForwardingPlayer? = null
     private var mediaSession: MediaSession? = null
 
     private val _isPlaying = MutableStateFlow(false)
@@ -55,6 +57,9 @@ class AudioPlayerService : Service() {
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 
+    private val _playbackEnded = MutableStateFlow(false)
+    val playbackEnded: StateFlow<Boolean> = _playbackEnded
+
     // WebDAV credentials
     private var webDavUsername: String = ""
     private var webDavPassword: String = ""
@@ -63,22 +68,80 @@ class AudioPlayerService : Service() {
         fun getService(): AudioPlayerService = this@AudioPlayerService
     }
 
+    /**
+     * Wraps ExoPlayer to:
+     * 1. Force COMMAND_SEEK_TO_NEXT/PREVIOUS to be available, so Fluid Cloud and system
+     *    media controls show next/previous buttons.
+     * 2. Smooth over track-switching transitions so the session appears continuously
+     *    playing (prevents Fluid Cloud from dismissing during the gap).
+     * Delegates actual seekToNext/seekToPrevious to broadcast for ViewModel handling.
+     */
+    @OptIn(UnstableApi::class)
+    inner class CustomForwardingPlayer(basePlayer: ExoPlayer) : BaseForwardingPlayer(basePlayer) {
+
+        /** True while we are between tracks (set before setMediaItem, cleared on STATE_READY). */
+        var switchingTrack = false
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            return when (command) {
+                Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> true
+                else -> super.isCommandAvailable(command)
+            }
+        }
+
+        override fun getAvailableCommands(): Player.Commands {
+            return Player.Commands.Builder()
+                .addAll(super.getAvailableCommands())
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .build()
+        }
+
+        override fun isPlaying(): Boolean {
+            // During track switching, keep reporting as playing to prevent Fluid Cloud from dismissing
+            if (switchingTrack && playWhenReady) return true
+            return super.isPlaying()
+        }
+
+        override fun getPlaybackState(): Int {
+            // During track switching, report BUFFERING instead of ENDED
+            if (switchingTrack && super.getPlaybackState() == Player.STATE_ENDED) {
+                return Player.STATE_BUFFERING
+            }
+            return super.getPlaybackState()
+        }
+
+        override fun seekToNext() {
+            sendBroadcast(Intent(ACTION_NEXT).setPackage(packageName))
+        }
+
+        override fun seekToNextMediaItem() {
+            sendBroadcast(Intent(ACTION_NEXT).setPackage(packageName))
+        }
+
+        override fun seekToPrevious() {
+            sendBroadcast(Intent(ACTION_PREVIOUS).setPackage(packageName))
+        }
+
+        override fun seekToPreviousMediaItem() {
+            sendBroadcast(Intent(ACTION_PREVIOUS).setPackage(packageName))
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         initializePlayer()
-        // Register media button receiver
-        val filter = android.content.IntentFilter().apply {
-            addAction(ACTION_PREVIOUS)
-            addAction(ACTION_PLAY_PAUSE)
-            addAction(ACTION_NEXT)
-        }
-        registerReceiver(mediaReceiver, filter, RECEIVER_NOT_EXPORTED)
     }
 
     fun setWebDAVCredentials(username: String, password: String) {
+        // Skip reinitialization if credentials haven't changed
+        if (username == webDavUsername && password == webDavPassword) return
         webDavUsername = username
         webDavPassword = password
         // Release existing player and reinitialize with new credentials
@@ -88,12 +151,12 @@ class AudioPlayerService : Service() {
 
     private fun releasePlayer() {
         mediaSession?.run {
-            player?.release()
             release()
         }
-        player?.release()
-        player = null
         mediaSession = null
+        exoPlayer?.release()
+        exoPlayer = null
+        player = null
     }
 
     @OptIn(UnstableApi::class)
@@ -101,7 +164,7 @@ class AudioPlayerService : Service() {
         val dataSourceFactory = createDataSourceFactory()
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        player = ExoPlayer.Builder(this)
+        exoPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .build().apply {
                 addListener(object : Player.Listener {
@@ -111,7 +174,11 @@ class AudioPlayerService : Service() {
 
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_READY) {
-                            _duration.value = player?.duration ?: 0L
+                            _duration.value = exoPlayer?.duration ?: 0L
+                            _playbackEnded.value = false
+                            player?.switchingTrack = false
+                        } else if (state == Player.STATE_ENDED && exoPlayer?.playWhenReady == true && player?.switchingTrack != true) {
+                            _playbackEnded.value = true
                         }
                     }
 
@@ -121,7 +188,9 @@ class AudioPlayerService : Service() {
                 })
             }
 
-        // Create MediaSession for lock screen controls and system integration
+        player = CustomForwardingPlayer(exoPlayer!!)
+
+        // Create MediaSession with CustomForwardingPlayer so system controls (Fluid Cloud, lock screen) see available commands
         mediaSession = MediaSession.Builder(this, player!!)
             .build()
     }
@@ -143,6 +212,8 @@ class AudioPlayerService : Service() {
         Log.d(TAG, "playMusic: ${musicItem.title}, source=${musicItem.source}")
 
         _currentMusic.value = musicItem
+        _playbackEnded.value = false
+        player?.switchingTrack = true
 
         // Create MediaItem with metadata for lock screen display
         val mediaItem = MediaItem.Builder()
@@ -156,12 +227,12 @@ class AudioPlayerService : Service() {
             )
             .build()
 
-        player?.apply {
+        exoPlayer?.apply {
             setMediaItem(mediaItem)
+            // RepeatMode.ONE is handled by ExoPlayer; all other modes by ViewModel
             this.repeatMode = when (repeatMode) {
-                RepeatMode.OFF -> Player.REPEAT_MODE_OFF
                 RepeatMode.ONE -> Player.REPEAT_MODE_ONE
-                RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+                else -> Player.REPEAT_MODE_OFF
             }
             prepare()
             play()
@@ -171,31 +242,31 @@ class AudioPlayerService : Service() {
     }
 
     fun setRepeatMode(mode: RepeatMode) {
-        player?.repeatMode = when (mode) {
-            RepeatMode.OFF -> Player.REPEAT_MODE_OFF
+        // RepeatMode.ONE is handled by ExoPlayer; all other modes by ViewModel
+        exoPlayer?.repeatMode = when (mode) {
             RepeatMode.ONE -> Player.REPEAT_MODE_ONE
-            RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+            else -> Player.REPEAT_MODE_OFF
         }
     }
 
     fun play() {
-        player?.play()
+        exoPlayer?.play()
     }
 
     fun pause() {
-        player?.pause()
+        exoPlayer?.pause()
     }
 
     fun togglePlayPause() {
-        if (player?.isPlaying == true) pause() else play()
+        if (exoPlayer?.isPlaying == true) pause() else play()
     }
 
     fun seekTo(position: Long) {
-        player?.seekTo(position)
+        exoPlayer?.seekTo(position)
     }
 
     fun updateProgress() {
-        _progress.value = player?.currentPosition ?: 0L
+        _progress.value = exoPlayer?.currentPosition ?: 0L
     }
 
     private fun createNotificationChannel() {
@@ -249,25 +320,6 @@ class AudioPlayerService : Service() {
             .build()
     }
 
-    private val mediaReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                ACTION_PREVIOUS -> {
-                    Log.d(TAG, "mediaReceiver: ACTION_PREVIOUS")
-                    sendBroadcast(Intent(ACTION_PREVIOUS).setPackage(packageName))
-                }
-                ACTION_PLAY_PAUSE -> {
-                    Log.d(TAG, "mediaReceiver: ACTION_PLAY_PAUSE")
-                    sendBroadcast(Intent(ACTION_PLAY_PAUSE).setPackage(packageName))
-                }
-                ACTION_NEXT -> {
-                    Log.d(TAG, "mediaReceiver: ACTION_NEXT")
-                    sendBroadcast(Intent(ACTION_NEXT).setPackage(packageName))
-                }
-            }
-        }
-    }
-
     companion object {
         const val ACTION_PREVIOUS = "com.webdav.music.ACTION_PREVIOUS"
         const val ACTION_PLAY_PAUSE = "com.webdav.music.ACTION_PLAY_PAUSE"
@@ -282,15 +334,10 @@ class AudioPlayerService : Service() {
     }
 
     override fun onDestroy() {
-        try {
-            unregisterReceiver(mediaReceiver)
-        } catch (e: Exception) {}
-        mediaSession?.run {
-            player.release()
-            release()
-            mediaSession = null
-        }
-        player?.release()
+        mediaSession?.release()
+        mediaSession = null
+        exoPlayer?.release()
+        exoPlayer = null
         player = null
         super.onDestroy()
     }

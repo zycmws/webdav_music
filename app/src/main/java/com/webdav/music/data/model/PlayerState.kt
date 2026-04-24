@@ -8,7 +8,9 @@ data class PlayerState(
     val progress: Long = 0,
     val duration: Long = 0,
     val shuffleMode: Boolean = false,
-    val repeatMode: RepeatMode = RepeatMode.OFF
+    val repeatMode: RepeatMode = RepeatMode.OFF,
+    val shuffledPlaylist: List<MusicItem> = emptyList(),
+    val shuffledIndex: Int = 0
 )
 
 enum class RepeatMode {

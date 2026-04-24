@@ -1,9 +1,11 @@
 package com.webdav.music
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.util.Log
@@ -56,6 +58,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var serviceBound = false
     private var progressUpdateJob: Job? = null
 
+    private val mediaActionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                AudioPlayerService.ACTION_NEXT -> playNext()
+                AudioPlayerService.ACTION_PREVIOUS -> playPrevious()
+                AudioPlayerService.ACTION_PLAY_PAUSE -> togglePlayPause()
+            }
+        }
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             Log.d(TAG, "onServiceConnected")
@@ -76,6 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         Log.d(TAG, "init")
         bindService()
+        registerMediaActionReceiver()
         checkOnboarding()
         loadLocalMusic()
     }
@@ -84,6 +97,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "bindService")
         val intent = Intent(getApplication(), AudioPlayerService::class.java)
         getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun registerMediaActionReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(AudioPlayerService.ACTION_NEXT)
+            addAction(AudioPlayerService.ACTION_PREVIOUS)
+            addAction(AudioPlayerService.ACTION_PLAY_PAUSE)
+        }
+        getApplication<Application>().registerReceiver(mediaActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
     }
 
     private fun checkOnboarding() {
@@ -153,24 +175,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Calculate index BEFORE shuffling for correct next/previous navigation
         val originalIndex = playlist.indexOf(musicItem)
 
-        val effectivePlaylist = if (_playerState.value.shuffleMode) {
-            playlist.shuffled()
+        if (_playerState.value.shuffleMode) {
+            // Check if we can reuse the existing shuffled playlist (same source playlist & contains the item)
+            val existingShuffled = _playerState.value.shuffledPlaylist
+            val canReuse = existingShuffled.size == playlist.size &&
+                existingShuffled.containsAll(playlist) &&
+                existingShuffled.contains(musicItem)
+
+            val shuffled = if (canReuse) existingShuffled else playlist.shuffled()
+            val sIndex = shuffled.indexOf(musicItem)
+            _playerState.update {
+                it.copy(
+                    currentMusic = musicItem,
+                    playlist = playlist,
+                    currentIndex = originalIndex,
+                    isPlaying = true,
+                    progress = 0,
+                    duration = musicItem.duration,
+                    shuffledPlaylist = shuffled,
+                    shuffledIndex = sIndex
+                )
+            }
         } else {
-            playlist
-        }
-        val index = effectivePlaylist.indexOf(musicItem)
-        _playerState.update {
-            it.copy(
-                currentMusic = musicItem,
-                playlist = playlist,  // Keep original playlist for next/prev
-                currentIndex = originalIndex,  // Save original index for correct navigation
-                isPlaying = true,
-                progress = 0,
-                duration = musicItem.duration
-            )
+            _playerState.update {
+                it.copy(
+                    currentMusic = musicItem,
+                    playlist = playlist,
+                    currentIndex = originalIndex,
+                    isPlaying = true,
+                    progress = 0,
+                    duration = musicItem.duration,
+                    shuffledPlaylist = emptyList(),
+                    shuffledIndex = 0
+                )
+            }
         }
         audioService?.playMusic(musicItem, _playerState.value.repeatMode)
     }
@@ -190,20 +230,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playNext() {
         val state = _playerState.value
-        Log.d(TAG, "playNext: playlist size=${state.playlist.size}, currentIndex=${state.currentIndex}")
         if (state.playlist.isEmpty()) return
-        val nextIndex = (state.currentIndex + 1) % state.playlist.size
-        Log.d(TAG, "playNext: nextIndex=$nextIndex, nextTrack=${state.playlist[nextIndex].title}")
-        playMusic(state.playlist[nextIndex], state.playlist)
+        if (state.shuffleMode && state.shuffledPlaylist.isNotEmpty()) {
+            val nextIndex = (state.shuffledIndex + 1) % state.shuffledPlaylist.size
+            _playerState.update { it.copy(shuffledIndex = nextIndex) }
+            val nextItem = state.shuffledPlaylist[nextIndex]
+            Log.d(TAG, "playNext (shuffle): shuffledIndex=$nextIndex, nextTrack=${nextItem.title}")
+            playMusicDirect(nextItem, state)
+        } else {
+            val nextIndex = (state.currentIndex + 1) % state.playlist.size
+            Log.d(TAG, "playNext: nextIndex=$nextIndex, nextTrack=${state.playlist[nextIndex].title}")
+            playMusic(state.playlist[nextIndex], state.playlist)
+        }
     }
 
     fun playPrevious() {
         val state = _playerState.value
-        Log.d(TAG, "playPrevious: playlist size=${state.playlist.size}, currentIndex=${state.currentIndex}")
         if (state.playlist.isEmpty()) return
-        val prevIndex = if (state.currentIndex > 0) state.currentIndex - 1 else state.playlist.size - 1
-        Log.d(TAG, "playPrevious: prevIndex=$prevIndex, prevTrack=${state.playlist[prevIndex].title}")
-        playMusic(state.playlist[prevIndex], state.playlist)
+        if (state.shuffleMode && state.shuffledPlaylist.isNotEmpty()) {
+            val prevIndex = if (state.shuffledIndex > 0) state.shuffledIndex - 1 else state.shuffledPlaylist.size - 1
+            _playerState.update { it.copy(shuffledIndex = prevIndex) }
+            val prevItem = state.shuffledPlaylist[prevIndex]
+            Log.d(TAG, "playPrevious (shuffle): shuffledIndex=$prevIndex, prevTrack=${prevItem.title}")
+            playMusicDirect(prevItem, state)
+        } else {
+            val prevIndex = if (state.currentIndex > 0) state.currentIndex - 1 else state.playlist.size - 1
+            Log.d(TAG, "playPrevious: prevIndex=$prevIndex, prevTrack=${state.playlist[prevIndex].title}")
+            playMusic(state.playlist[prevIndex], state.playlist)
+        }
+    }
+
+    /**
+     * Directly play a music item without regenerating the shuffled playlist.
+     * Used when navigating next/previous in shuffle mode.
+     */
+    private fun playMusicDirect(musicItem: MusicItem, state: PlayerState) {
+        if (musicItem.source == com.webdav.music.data.model.MusicSource.WEBDAV) {
+            runBlocking {
+                val config = repository.getWebDAVConfig()
+                audioService?.setWebDAVCredentials(config.username, config.password)
+            }
+        }
+
+        val originalIndex = state.playlist.indexOf(musicItem)
+        _playerState.update {
+            it.copy(
+                currentMusic = musicItem,
+                currentIndex = originalIndex,
+                isPlaying = true,
+                progress = 0,
+                duration = musicItem.duration
+            )
+        }
+        audioService?.playMusic(musicItem, state.repeatMode)
     }
 
     fun seekTo(position: Long) {
@@ -212,8 +291,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShuffle() {
-        val newMode = !_playerState.value.shuffleMode
-        _playerState.update { it.copy(shuffleMode = newMode) }
+        val state = _playerState.value
+        val newMode = !state.shuffleMode
+        if (newMode && state.playlist.isNotEmpty()) {
+            // Generate shuffled playlist, ensure current song is first
+            val remaining = state.playlist.filter { it != state.currentMusic }.shuffled()
+            val shuffled = if (state.currentMusic != null) {
+                listOf(state.currentMusic!!) + remaining
+            } else {
+                remaining
+            }
+            _playerState.update {
+                it.copy(
+                    shuffleMode = newMode,
+                    shuffledPlaylist = shuffled,
+                    shuffledIndex = 0
+                )
+            }
+        } else {
+            _playerState.update {
+                it.copy(
+                    shuffleMode = newMode,
+                    shuffledPlaylist = emptyList(),
+                    shuffledIndex = 0
+                )
+            }
+        }
         viewModelScope.launch {
             repository.preferencesManager.saveShuffleMode(newMode)
         }
@@ -294,6 +397,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _errorMessage.value = null
     }
 
+    private fun onPlaybackEnded() {
+        val state = _playerState.value
+        Log.d(TAG, "onPlaybackEnded: repeatMode=${state.repeatMode}, shuffleMode=${state.shuffleMode}")
+        when (state.repeatMode) {
+            RepeatMode.ONE -> {
+                // RepeatMode.ONE is handled by ExoPlayer internally, no action needed
+                // But if it somehow gets here, replay the current track
+                state.currentMusic?.let { playMusicDirect(it, state) }
+            }
+            RepeatMode.ALL -> {
+                playNext()
+            }
+            RepeatMode.OFF -> {
+                // Check if we're at the last track
+                val isLastTrack = if (state.shuffleMode && state.shuffledPlaylist.isNotEmpty()) {
+                    state.shuffledIndex >= state.shuffledPlaylist.size - 1
+                } else {
+                    state.currentIndex >= state.playlist.size - 1
+                }
+                if (isLastTrack) {
+                    // Stop playback at the end of the playlist
+                    _playerState.update { it.copy(isPlaying = false) }
+                } else {
+                    playNext()
+                }
+            }
+        }
+    }
+
     private fun syncServiceState() {
         viewModelScope.launch {
             audioService?.isPlaying?.collect { playing ->
@@ -304,6 +436,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             audioService?.currentMusic?.collect { music ->
                 if (music != null && music != _playerState.value.currentMusic) {
                     _playerState.update { it.copy(currentMusic = music) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            audioService?.playbackEnded?.collect { ended ->
+                if (ended) {
+                    onPlaybackEnded()
                 }
             }
         }
@@ -335,6 +474,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         progressUpdateJob?.cancel()
+        try {
+            getApplication<Application>().unregisterReceiver(mediaActionReceiver)
+        } catch (_: Exception) {}
         if (serviceBound) {
             getApplication<Application>().unbindService(serviceConnection)
             serviceBound = false
