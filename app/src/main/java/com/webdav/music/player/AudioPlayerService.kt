@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -44,6 +45,16 @@ class AudioPlayerService : Service() {
     private var exoPlayer: ExoPlayer? = null
     private var player: CustomForwardingPlayer? = null
     private var mediaSession: MediaSession? = null
+
+    // 蓝牙断开/耳机拔出时暂停播放
+    private val audioBecomingNoisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                Log.d(TAG, "音频输出断开，暂停播放")
+                pause()
+            }
+        }
+    }
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
@@ -137,6 +148,7 @@ class AudioPlayerService : Service() {
         super.onCreate()
         createNotificationChannel()
         initializePlayer()
+        registerAudioBecomingNoisyReceiver()
     }
 
     fun setWebDAVCredentials(username: String, password: String) {
@@ -320,6 +332,17 @@ class AudioPlayerService : Service() {
             .build()
     }
 
+    private fun registerAudioBecomingNoisyReceiver() {
+        val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        registerReceiver(audioBecomingNoisyReceiver, filter)
+    }
+
+    private fun unregisterAudioBecomingNoisyReceiver() {
+        try {
+            unregisterReceiver(audioBecomingNoisyReceiver)
+        } catch (_: Exception) {}
+    }
+
     companion object {
         const val ACTION_PREVIOUS = "com.webdav.music.ACTION_PREVIOUS"
         const val ACTION_PLAY_PAUSE = "com.webdav.music.ACTION_PLAY_PAUSE"
@@ -334,6 +357,7 @@ class AudioPlayerService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterAudioBecomingNoisyReceiver()
         mediaSession?.release()
         mediaSession = null
         exoPlayer?.release()
