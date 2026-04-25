@@ -26,7 +26,11 @@ class MusicRepository(context: Context) {
 
     suspend fun getWebDAVMusic(): List<MusicItem> {
         Log.d(TAG, "getWebDAVMusic: 开始获取 WebDAV 音乐")
-        val config = getWebDAVConfig()
+        val config = getCurrentWebDAVConfig()
+        if (config == null) {
+            Log.w(TAG, "getWebDAVMusic: 没有选中的 WebDAV 服务器配置")
+            return emptyList()
+        }
         Log.d(TAG, "getWebDAVMusic: config.serverUrl=${config.serverUrl}")
         return if (config.isValid()) {
             Log.d(TAG, "getWebDAVMusic: 配置有效，开始 listMusic")
@@ -42,16 +46,50 @@ class MusicRepository(context: Context) {
     }
 
     suspend fun getWebDAVConfig(): WebDAVConfig {
-        return WebDAVConfig(
-            serverUrl = preferencesManager.webDAVServerUrl.first(),
-            username = preferencesManager.webDAVUsername.first(),
-            password = preferencesManager.webDAVPassword.first()
-        )
+        return getCurrentWebDAVConfig()
+            ?: WebDAVConfig(serverUrl = "", username = "", password = "")
+    }
+
+    suspend fun getWebDAVServices(): List<WebDAVConfig> {
+        Log.d(TAG, "getWebDAVServices: 获取所有 WebDAV 服务器")
+        return preferencesManager.webDAVServices.first()
+    }
+
+    suspend fun getCurrentWebDAVConfig(): WebDAVConfig? {
+        Log.d(TAG, "getCurrentWebDAVConfig: 获取当前选中的 WebDAV 配置")
+        return preferencesManager.getCurrentWebDAVConfig()
+    }
+
+    suspend fun addWebDAVService(config: WebDAVConfig) {
+        Log.d(TAG, "addWebDAVService: 添加服务器 displayName=${config.displayName}")
+        preferencesManager.addWebDAVService(config)
+    }
+
+    suspend fun updateWebDAVService(config: WebDAVConfig) {
+        Log.d(TAG, "updateWebDAVService: 更新服务器 id=${config.id}")
+        preferencesManager.updateWebDAVService(config)
+    }
+
+    suspend fun deleteWebDAVService(id: String) {
+        Log.d(TAG, "deleteWebDAVService: 删除服务器 id=$id")
+        preferencesManager.deleteWebDAVService(id)
+    }
+
+    suspend fun setCurrentWebDAVService(id: String) {
+        Log.d(TAG, "setCurrentWebDAVService: 设置当前服务器 id=$id")
+        preferencesManager.setCurrentWebDAVService(id)
     }
 
     suspend fun saveWebDAVConfig(config: WebDAVConfig) {
         Log.d(TAG, "saveWebDAVConfig: 保存配置 serverUrl=${config.serverUrl}")
-        preferencesManager.saveWebDAVConfig(config.serverUrl, config.username, config.password)
+        val services = getWebDAVServices()
+        val existing = services.find { it.id == config.id }
+        if (existing != null) {
+            updateWebDAVService(config)
+        } else {
+            addWebDAVService(config)
+            setCurrentWebDAVService(config.id)
+        }
     }
 
     suspend fun testWebDAVConnection(config: WebDAVConfig): Boolean {
