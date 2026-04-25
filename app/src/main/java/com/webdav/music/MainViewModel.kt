@@ -155,7 +155,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.d(TAG, "loadWebDAVMusic: 最终列表 ${_webDAVMusic.value.size} 首")
             } catch (e: Exception) {
                 Log.e(TAG, "loadWebDAVMusic: 失败 ${e.message}")
-                e.printStackTrace()
                 _errorMessage.value = "加载 WebDAV 音乐失败: ${e.message}"
             } finally {
                 _isLoading.value = false

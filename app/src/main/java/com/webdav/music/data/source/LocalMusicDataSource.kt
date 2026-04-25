@@ -60,8 +60,7 @@ class LocalMusicDataSource(private val context: Context) {
             scanDocumentFile(documentFile, audioExtensions, musicItems, documentFile.name ?: "Unknown")
 
         } catch (e: Exception) {
-            Log.e(TAG, "scanMusicViaSAF: 错误 ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "scanMusicViaSAF: 错误 ${e.message}", e)
         }
 
         Log.d(TAG, "scanMusicViaSAF: 扫描到 ${musicItems.size} 首音乐")

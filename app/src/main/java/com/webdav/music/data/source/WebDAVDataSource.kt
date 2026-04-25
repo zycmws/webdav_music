@@ -28,7 +28,6 @@ class WebDAVDataSource(private val context: Context) {
     suspend fun testConnection(config: WebDAVConfig): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "testConnection: 测试连接 ${config.serverUrl}")
-            Log.d(TAG, "testConnection: 用户名 ${config.username}")
 
             val request = Request.Builder()
                 .url(config.serverUrl)
@@ -45,7 +44,6 @@ class WebDAVDataSource(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "testConnection: 连接失败 ${e.message}")
-            e.printStackTrace()
             false
         }
     }
@@ -83,8 +81,7 @@ class WebDAVDataSource(private val context: Context) {
             Log.d(TAG, "listMusic: 总共获取到 ${items.size} 首歌曲")
             items
         } catch (e: Exception) {
-            Log.e(TAG, "listMusic: 失败 ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "listMusic: 失败 ${e.message}", e)
             emptyList()
         }
     }
@@ -114,8 +111,7 @@ class WebDAVDataSource(private val context: Context) {
                 parseWebDAVResponse(body, config, debugName)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "fetchMusicFromUrl [$debugName]: 异常 ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "fetchMusicFromUrl [$debugName]: 异常 ${e.message}", e)
             emptyList()
         }
     }
@@ -127,24 +123,13 @@ class WebDAVDataSource(private val context: Context) {
 
         Log.d(TAG, "parseWebDAVResponse [$debugName]: 解析 ${xml.length} 字符")
 
-        val matches = hrefPattern.findAll(xml).toList()
-        Log.d(TAG, "parseWebDAVResponse [$debugName]: 找到 ${matches.count()} 个 href")
-
-        // Also log all hrefs for debugging
-        matches.forEach { match ->
+        hrefPattern.findAll(xml).forEach { match ->
             val href = match.groupValues[1]
-            Log.d(TAG, "parseWebDAVResponse [$debugName]: href=$href")
-        }
-
-        hrefPattern.findAll(xml).forEach { hrefMatch ->
-            val href = hrefMatch.groupValues[1]
-            // URL decode the full href
             val decodedHref = URLDecoder.decode(href, "UTF-8")
             val fileName = decodedHref.substringAfterLast("/")
             val extension = fileName.substringAfterLast(".").lowercase()
 
             if (extension in audioExtensions) {
-                // Build full URL correctly
                 val baseUrl = config.serverUrl.trimEnd('/')
                 val fullPath = decodedHref.trimStart('/')
                 val url = "$baseUrl/$fullPath"
@@ -165,6 +150,7 @@ class WebDAVDataSource(private val context: Context) {
                 )
             }
         }
+
         Log.d(TAG, "parseWebDAVResponse [$debugName]: 解析到 ${musicItems.size} 首歌曲")
         return musicItems
     }

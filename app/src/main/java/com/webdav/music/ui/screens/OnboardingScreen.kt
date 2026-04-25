@@ -22,9 +22,9 @@ fun OnboardingScreen(
     onComplete: () -> Unit,
     onSkip: () -> Unit
 ) {
-    var serverUrl by remember { mutableStateOf("http://192.168.1.5:5005/") }
-    var username by remember { mutableStateOf("zyc") }
-    var password by remember { mutableStateOf("zcgy1011") }
+    var serverUrl by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -104,7 +104,6 @@ fun OnboardingScreen(
             onClick = {
                 Log.d(TAG, "点击连接按钮")
                 Log.d(TAG, "服务器: $serverUrl")
-                Log.d(TAG, "用户名: $username")
 
                 if (serverUrl.isBlank()) {
                     errorMessage = "请输入服务器地址"
