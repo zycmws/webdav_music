@@ -54,6 +54,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _hasCompletedOnboarding = MutableStateFlow(false)
     val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
+    private val _webDAVServices = MutableStateFlow<List<WebDAVConfig>>(emptyList())
+    val webDAVServices: StateFlow<List<WebDAVConfig>> = _webDAVServices.asStateFlow()
+
+    private val _currentWebDAVId = MutableStateFlow<String?>(null)
+    val currentWebDAVId: StateFlow<String?> = _currentWebDAVId.asStateFlow()
+
+    private val _currentWebDAVName = MutableStateFlow<String?>(null)
+    val currentWebDAVName: StateFlow<String?> = _currentWebDAVName.asStateFlow()
+
     private var audioService: AudioPlayerService? = null
     private var serviceBound = false
     private var progressUpdateJob: Job? = null
@@ -91,6 +100,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         registerMediaActionReceiver()
         checkOnboarding()
         loadLocalMusic()
+        collectWebDAVServices()
     }
 
     private fun bindService() {
@@ -114,6 +124,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.hasCompletedOnboarding().collect {
                 Log.d(TAG, "hasCompletedOnboarding: $it")
                 _hasCompletedOnboarding.value = it
+            }
+        }
+    }
+
+    private fun collectWebDAVServices() {
+        viewModelScope.launch {
+            repository.preferencesManager.webDAVServices.collect {
+                _webDAVServices.value = it
+            }
+        }
+        viewModelScope.launch {
+            repository.preferencesManager.currentWebDAVId.collect {
+                val previousId = _currentWebDAVId.value
+                _currentWebDAVId.value = it
+                // Auto-reload WebDAV music when current server changes and WebDAV tab is active
+                if (previousId != it && _selectedTab.value == 1) {
+                    Log.d(TAG, "currentWebDAVId changed from $previousId to $it, reloading WebDAV music")
+                    loadWebDAVMusic()
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.preferencesManager.webDAVServices.combine(
+                repository.preferencesManager.currentWebDAVId
+            ) { services, currentId ->
+                services.find { it.id == currentId }?.displayName
+            }.collect {
+                _currentWebDAVName.value = it
             }
         }
     }
@@ -168,9 +206,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Set WebDAV credentials if playing WebDAV music (synchronous for immediate use)
         if (musicItem.source == com.webdav.music.data.model.MusicSource.WEBDAV) {
             runBlocking {
-                val config = repository.getWebDAVConfig()
-                Log.d(TAG, "playMusic: 设置 WebDAV 认证 ${config.username}")
-                audioService?.setWebDAVCredentials(config.username, config.password)
+                val config = repository.getCurrentWebDAVConfig()
+                if (config != null) {
+                    Log.d(TAG, "playMusic: 设置 WebDAV 认证 ${config.username}")
+                    audioService?.setWebDAVCredentials(config.username, config.password)
+                } else {
+                    Log.w(TAG, "playMusic: 无当前 WebDAV 配置")
+                }
             }
         }
 
@@ -266,8 +308,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun playMusicDirect(musicItem: MusicItem, state: PlayerState) {
         if (musicItem.source == com.webdav.music.data.model.MusicSource.WEBDAV) {
             runBlocking {
-                val config = repository.getWebDAVConfig()
-                audioService?.setWebDAVCredentials(config.username, config.password)
+                val config = repository.getCurrentWebDAVConfig()
+                if (config != null) {
+                    Log.d(TAG, "playMusicDirect: 设置 WebDAV 认证 ${config.username}")
+                    audioService?.setWebDAVCredentials(config.username, config.password)
+                } else {
+                    Log.w(TAG, "playMusicDirect: 无当前 WebDAV 配置")
+                }
             }
         }
 
