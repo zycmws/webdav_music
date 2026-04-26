@@ -32,6 +32,7 @@ fun MainScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val currentWebDAVName by viewModel.currentWebDAVName.collectAsState()
 
     var showOnboarding by remember { mutableStateOf(!hasCompletedOnboarding) }
     var showSettings by remember { mutableStateOf(false) }
@@ -128,12 +129,32 @@ fun MainScreen(
                     }
 
                     if (tracks.isEmpty()) {
-                        Text(
-                            text = if (selectedTab == 0) "未找到本地音乐" else "未找到 WebDAV 音乐",
+                        Column(
                             modifier = Modifier.align(Alignment.Center),
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (selectedTab == 1 && currentWebDAVName == null) {
+                                Text(
+                                    text = "请前往设置添加并选择 WebDAV 服务器",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            } else {
+                                Text(
+                                    text = if (selectedTab == 0) "未找到本地音乐" else "未找到 WebDAV 音乐",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
                     } else {
+                        if (selectedTab == 1 && currentWebDAVName != null) {
+                            Text(
+                                text = "当前：$currentWebDAVName",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
                         TrackList(
                             tracks = tracks,
                             currentTrackId = playerState.currentMusic?.id,
