@@ -119,7 +119,9 @@ fun OnboardingScreen(
 
                     if (success) {
                         Log.d(TAG, "连接成功，保存配置")
-                        repository.saveWebDAVConfig(config)
+                        val configWithName = config.copy(displayName = "服务器 1")
+                        repository.addWebDAVService(configWithName)
+                        repository.setCurrentWebDAVService(configWithName.id)
                         repository.setOnboardingCompleted()
                         Log.d(TAG, "跳转主页面")
                         onComplete()
