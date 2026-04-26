@@ -4,11 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -24,7 +25,24 @@ fun TrackList(
     onDownload: ((MusicItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    LazyColumn(modifier = modifier) {
+    val listState = rememberLazyListState()
+    var previousTrackId by remember { mutableStateOf<String?>(null) }
+
+    // Auto-scroll to center the currently playing track when it changes
+    LaunchedEffect(currentTrackId) {
+        if (currentTrackId != null && currentTrackId != previousTrackId) {
+            previousTrackId = currentTrackId
+            val index = tracks.indexOfFirst { it.id == currentTrackId }
+            if (index >= 0) {
+                listState.animateScrollToItem(
+                    index = index,
+                    scrollOffset = -(listState.layoutInfo.viewportSize.height / 2) + 40
+                )
+            }
+        }
+    }
+
+    LazyColumn(state = listState, modifier = modifier) {
         items(tracks, key = { it.id }) { track ->
             TrackItem(
                 track = track,
